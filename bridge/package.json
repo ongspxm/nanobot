@@ -1,20 +1,11 @@
 {
-  "name": "nanobot-whatsapp-bridge",
-  "version": "0.1.0",
-  "description": "WhatsApp bridge for nanobot using Baileys",
-  "type": "module",
-  "main": "dist/index.js",
-  "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsc && node dist/index.js"
-  },
   "dependencies": {
     "@whiskeysockets/baileys": "7.0.0-rc.9",
-    "ws": "^8.17.1",
+    "pino": "^9.0.0",
     "qrcode-terminal": "^0.12.0",
-    "pino": "^9.0.0"
+    "ws": "^8.17.1"
   },
+  "description": "WhatsApp bridge for nanobot using Baileys",
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/ws": "^8.5.10",
@@ -22,5 +13,14 @@
   },
   "engines": {
     "node": ">=20.0.0"
-  }
+  },
+  "main": "dist/index.js",
+  "name": "nanobot-whatsapp-bridge",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc && node dist/index.js",
+    "start": "node dist/index.js"
+  },
+  "type": "module",
+  "version": "0.1.0"
 }

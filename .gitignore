@@ -20,3 +20,6 @@ poetry.lock
 .pytest_cache/
 botpy.log
 tests/
+.code/
+*.swp
+!.pre-commit-config.yaml

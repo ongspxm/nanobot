@@ -7,11 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
+from nanobot.bus.events import OutboundMessage
 
 
 class ExecTool(Tool):
     """Tool to execute shell commands."""
-    
+
     def __init__(
         self,
         timeout: int = 60,
@@ -20,55 +21,93 @@ class ExecTool(Tool):
         allow_patterns: list[str] | None = None,
         restrict_to_workspace: bool = False,
         path_append: str = "",
+        send_callback=None,
+        default_channel: str = "",
+        default_chat_id: str = "",
+        default_message_id: str | None = None,
+        default_session_key: str | None = None,
     ):
         self.timeout = timeout
         self.working_dir = working_dir
         self.deny_patterns = deny_patterns or [
-            r"\brm\s+-[rf]{1,2}\b",          # rm -r, rm -rf, rm -fr
-            r"\bdel\s+/[fq]\b",              # del /f, del /q
-            r"\brmdir\s+/s\b",               # rmdir /s
-            r"(?:^|[;&|]\s*)format\b",       # format (as standalone command only)
-            r"\b(mkfs|diskpart)\b",          # disk operations
-            r"\bdd\s+if=",                   # dd
-            r">\s*/dev/sd",                  # write to disk
+            r"\brm\s+-[rf]{1,2}\b",  # rm -r, rm -rf, rm -fr
+            r"\bdel\s+/[fq]\b",  # del /f, del /q
+            r"\brmdir\s+/s\b",  # rmdir /s
+            r"(?:^|[;&|]\s*)format\b",  # format (as standalone command only)
+            r"\b(mkfs|diskpart)\b",  # disk operations
+            r"\bdd\s+if=",  # dd
+            r">\s*/dev/sd",  # write to disk
             r"\b(shutdown|reboot|poweroff)\b",  # system power
-            r":\(\)\s*\{.*\};\s*:",          # fork bomb
+            r":\(\)\s*\{.*\};\s*:",  # fork bomb
         ]
         self.allow_patterns = allow_patterns or []
         self.restrict_to_workspace = restrict_to_workspace
         self.path_append = path_append
-    
+        self._send_callback = send_callback
+        self._default_channel = default_channel
+        self._default_chat_id = default_chat_id
+        self._default_message_id = default_message_id
+        self._default_session_key = default_session_key
+
+    def set_context(
+        self,
+        channel: str,
+        chat_id: str,
+        message_id: str | None = None,
+        session_key: str | None = None,
+    ) -> None:
+        """Set routing context for optional raw output delivery."""
+        self._default_channel = channel
+        self._default_chat_id = chat_id
+        self._default_message_id = message_id
+        self._default_session_key = session_key
+
     @property
     def name(self) -> str:
         return "exec"
-    
+
     @property
     def description(self) -> str:
         return "Execute a shell command and return its output. Use with caution."
-    
+
     @property
     def parameters(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "command": {
-                    "type": "string",
-                    "description": "The shell command to execute"
-                },
+                "command": {"type": "string", "description": "The shell command to execute"},
                 "working_dir": {
                     "type": "string",
-                    "description": "Optional working directory for the command"
-                }
+                    "description": "Optional working directory for the command",
+                },
+                "raw_output": {
+                    "type": "boolean",
+                    "description": "If true, send command output directly to the current chat channel",
+                },
+                "timeout_seconds": {
+                    "type": "integer",
+                    "description": "Optional timeout for this command in seconds",
+                },
             },
-            "required": ["command"]
+            "required": ["command"],
         }
-    
-    async def execute(self, command: str, working_dir: str | None = None, **kwargs: Any) -> str:
+
+    async def execute(
+        self,
+        command: str,
+        working_dir: str | None = None,
+        raw_output: bool = False,
+        timeout_seconds: int | None = None,
+        **kwargs: Any,
+    ) -> str:
         cwd = working_dir or self.working_dir or os.getcwd()
+        if timeout_seconds is not None and timeout_seconds <= 0:
+            return "Error: timeout_seconds must be greater than 0"
+        effective_timeout = timeout_seconds if timeout_seconds is not None else self.timeout
         guard_error = self._guard_command(command, cwd)
         if guard_error:
             return guard_error
-        
+
         env = os.environ.copy()
         if self.path_append:
             env["PATH"] = env.get("PATH", "") + os.pathsep + self.path_append
@@ -81,11 +120,11 @@ class ExecTool(Tool):
                 cwd=cwd,
                 env=env,
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
                     process.communicate(),
-                    timeout=self.timeout
+                    timeout=effective_timeout,
                 )
             except asyncio.TimeoutError:
                 process.kill()
@@ -95,32 +134,69 @@ class ExecTool(Tool):
                     await asyncio.wait_for(process.wait(), timeout=5.0)
                 except asyncio.TimeoutError:
                     pass
-                return f"Error: Command timed out after {self.timeout} seconds"
-            
+                return f"Error: Command timed out after {effective_timeout} seconds"
+
             output_parts = []
-            
+
             if stdout:
                 output_parts.append(stdout.decode("utf-8", errors="replace"))
-            
+
             if stderr:
                 stderr_text = stderr.decode("utf-8", errors="replace")
                 if stderr_text.strip():
                     output_parts.append(f"STDERR:\n{stderr_text}")
-            
+
             if process.returncode != 0:
                 output_parts.append(f"\nExit code: {process.returncode}")
-            
-            result = "\n".join(output_parts) if output_parts else "(no output)"
-            
-            # Truncate very long output
+
+            full_result = "\n".join(output_parts) if output_parts else "(no output)"
+
+            # Truncate very long output for tool return/session storage.
             max_len = 10000
-            if len(result) > max_len:
-                result = result[:max_len] + f"\n... (truncated, {len(result) - max_len} more chars)"
-            
-            return result
-            
+            result_for_return = full_result
+            if len(result_for_return) > max_len:
+                result_for_return = (
+                    result_for_return[:max_len]
+                    + f"\n... (truncated, {len(result_for_return) - max_len} more chars)"
+                )
+
+            if raw_output:
+                # Raw mode sends the complete output to the channel, while the
+                # tool return remains truncated-safe for session history.
+                status = await self._send_raw_output(full_result)
+                note = (
+                    "\n\nalready sent to the user because raw_output=True, "
+                    "DO NOT SEND DETAILS AGAIN"
+                )
+                return f"{status}\n\n{result_for_return}{note}"
+
+            return result_for_return
+
         except Exception as e:
             return f"Error executing command: {str(e)}"
+
+    async def _send_raw_output(self, output: str) -> str:
+        """Send tool output straight to chat when requested by the caller."""
+        if not self._default_channel or not self._default_chat_id:
+            return "Error: raw_output requested but no target channel/chat is available"
+        if not self._send_callback:
+            return "Error: raw_output requested but message sending is not configured"
+
+        msg = OutboundMessage(
+            channel=self._default_channel,
+            chat_id=self._default_chat_id,
+            content=f"[raw]\n{output}",
+            metadata={
+                "message_id": self._default_message_id,
+                "raw_output": True,
+                "_session_key": self._default_session_key,
+            },
+        )
+        try:
+            await self._send_callback(msg)
+        except Exception as e:
+            return f"Error: Failed to send raw output: {e}"
+        return f"Raw output sent to {self._default_channel}:{self._default_chat_id}"
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
