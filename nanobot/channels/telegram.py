@@ -567,9 +567,7 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         session_key = self._reply_session_key(message)
-        reply_to_message_id = (
-            message.reply_to_message.message_id if message.reply_to_message else None
-        )
+        reply_to_message_id = message.reply_to_message.message_id if message.reply_to_message else None
         if session_key:
             logger.debug("Telegram reply routed to session {}", session_key)
 

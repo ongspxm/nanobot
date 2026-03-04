@@ -52,7 +52,7 @@ async def test_exec_tool_allows_per_call_timeout_seconds() -> None:
     tool = ExecTool(timeout=5)
 
     result = await tool.execute(
-        'python3 -c "import time; time.sleep(2)"',
+        "python3 -c \"import time; time.sleep(2)\"",
         timeout_seconds=1,
     )
 

@@ -247,9 +247,8 @@ class CronService:
         logger.info("Cron: executing job '{}' ({})", job.name, job.id)
 
         try:
-            response = None
             if self.on_job:
-                response = await self.on_job(job)
+                await self.on_job(job)
 
             job.state.last_status = "ok"
             job.state.last_error = None
@@ -350,6 +349,48 @@ class CronService:
                 self._save_store()
                 self._arm_timer()
                 return job
+        return None
+
+    def edit_job(
+        self,
+        job_id: str,
+        message: str | None = None,
+        cron_expr: str | None = None,
+    ) -> CronJob | None:
+        """Edit an existing job's message and/or cron expression."""
+        if message is None and cron_expr is None:
+            raise ValueError("at least one of message or cron_expr is required")
+
+        store = self._load_store()
+        for job in store.jobs:
+            if job.id != job_id:
+                continue
+
+            if message is not None:
+                if not message.strip():
+                    raise ValueError("message cannot be empty")
+                # Keep name aligned with message, same behavior as add.
+                job.name = message.strip() or message
+                job.payload.message = message
+
+            if cron_expr is not None:
+                if not cron_expr.strip():
+                    raise ValueError("cron_expr cannot be empty")
+                tz = job.schedule.tz if job.schedule.kind == "cron" else None
+                job.schedule = CronSchedule(kind="cron", expr=cron_expr, tz=tz)
+                next_run = _compute_next_run(job.schedule, _now_ms())
+                if next_run is None:
+                    raise ValueError("invalid cron_expr")
+                if job.enabled:
+                    job.state.next_run_at_ms = next_run
+                else:
+                    job.state.next_run_at_ms = None
+
+            job.updated_at_ms = _now_ms()
+            self._save_store()
+            self._arm_timer()
+            return job
+
         return None
 
     async def run_job(self, job_id: str, force: bool = False) -> bool:

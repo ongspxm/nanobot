@@ -344,7 +344,7 @@ def gateway(
                 OutboundMessage(
                     channel=job.payload.channel or "cli",
                     chat_id=job.payload.to,
-                    content=job.payload.message,
+                    content=f"=== MSG ===\n{job.payload.message}",
                     metadata={"_session_key": session_key, "_cron_trigger": True},
                 )
             )
@@ -1110,7 +1110,7 @@ def cron_run(
             return False
 
     async def on_job(job: CronJob) -> str | None:
-        await _deliver_manual_run(job, job.payload.message)
+        await _deliver_manual_run(job, f"=== MSG ===\n{job.payload.message}")
         response = await agent_loop.process_direct(
             job.payload.message,
             session_key=f"cron:{job.id}",

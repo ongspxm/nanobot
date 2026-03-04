@@ -1,5 +1,6 @@
 """Cron tool for scheduling reminders and tasks."""
 
+import json
 from typing import Any
 
 from nanobot.agent.tools.base import Tool
@@ -26,7 +27,7 @@ class CronTool(Tool):
 
     @property
     def description(self) -> str:
-        return "Schedule reminders and recurring tasks. Actions: add, list, remove."
+        return "Schedule reminders and recurring tasks. Actions: add, list, remove, edit."
 
     @property
     def parameters(self) -> dict[str, Any]:
@@ -35,7 +36,7 @@ class CronTool(Tool):
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["add", "list", "remove"],
+                    "enum": ["add", "list", "remove", "edit"],
                     "description": "Action to perform",
                 },
                 "message": {"type": "string", "description": "Reminder message (for add)"},
@@ -55,7 +56,7 @@ class CronTool(Tool):
                     "type": "string",
                     "description": "ISO datetime for one-time execution (e.g. '2026-02-12T10:30:00')",
                 },
-                "job_id": {"type": "string", "description": "Job ID (for remove)"},
+                "job_id": {"type": "string", "description": "Job ID (for remove/edit)"},
             },
             "required": ["action"],
         }
@@ -77,6 +78,8 @@ class CronTool(Tool):
             return self._list_jobs()
         elif action == "remove":
             return self._remove_job(job_id)
+        elif action == "edit":
+            return self._edit_job(job_id, message, cron_expr)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -133,10 +136,32 @@ class CronTool(Tool):
 
     def _list_jobs(self) -> str:
         jobs = self._cron.list_jobs()
-        if not jobs:
-            return "No scheduled jobs."
-        lines = [f"- {j.name} (id: {j.id}, {j.schedule.kind})" for j in jobs]
-        return "Scheduled jobs:\n" + "\n".join(lines)
+        lines: list[str] = []
+        for j in jobs:
+            schedule: dict[str, Any] = {"kind": j.schedule.kind}
+            if j.schedule.kind == "every":
+                schedule["every_seconds"] = (j.schedule.every_ms or 0) // 1000
+            elif j.schedule.kind == "cron":
+                schedule["expr"] = j.schedule.expr
+                if j.schedule.tz:
+                    schedule["tz"] = j.schedule.tz
+            elif j.schedule.kind == "at":
+                schedule["at_ms"] = j.schedule.at_ms
+
+            lines.append(
+                json.dumps(
+                    {
+                        "id": j.id,
+                        "name": j.name,
+                        "raw_msg": j.payload.message,
+                        "kind": j.schedule.kind,
+                        "schedule": schedule,
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        return "\n".join(lines)
 
     def _remove_job(self, job_id: str | None) -> str:
         if not job_id:
@@ -144,3 +169,27 @@ class CronTool(Tool):
         if self._cron.remove_job(job_id):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
+
+    def _edit_job(self, job_id: str | None, message: str, cron_expr: str | None) -> str:
+        if not job_id:
+            return "Error: job_id is required for edit"
+
+        message_update: str | None = message if message else None
+        cron_update: str | None = cron_expr if cron_expr else None
+        if message_update is None and cron_update is None:
+            return "Error: provide message and/or cron_expr for edit"
+
+        try:
+            job = self._cron.edit_job(job_id=job_id, message=message_update, cron_expr=cron_update)
+        except ValueError as e:
+            return f"Error: {e}"
+
+        if not job:
+            return f"Job {job_id} not found"
+
+        updates: list[str] = []
+        if message_update is not None:
+            updates.append("message")
+        if cron_update is not None:
+            updates.append("cron_expr")
+        return f"Updated job {job.id}: {', '.join(updates)}"
