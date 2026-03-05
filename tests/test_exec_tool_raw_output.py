@@ -31,7 +31,7 @@ async def test_exec_tool_raw_output_sends_to_channel() -> None:
     outbound = send_callback.await_args.args[0]
     assert outbound.channel == "telegram"
     assert outbound.chat_id == "12345"
-    assert outbound.content == "[raw]\nhello from exec"
+    assert outbound.content == "=== raw ===\nhello from exec"
     assert outbound.metadata.get("raw_output") is True
     assert outbound.metadata.get("message_id") == "99"
 
@@ -52,7 +52,7 @@ async def test_exec_tool_allows_per_call_timeout_seconds() -> None:
     tool = ExecTool(timeout=5)
 
     result = await tool.execute(
-        "python3 -c \"import time; time.sleep(2)\"",
+        'python3 -c "import time; time.sleep(2)"',
         timeout_seconds=1,
     )
 

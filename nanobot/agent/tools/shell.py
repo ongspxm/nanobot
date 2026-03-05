@@ -185,7 +185,7 @@ class ExecTool(Tool):
         msg = OutboundMessage(
             channel=self._default_channel,
             chat_id=self._default_chat_id,
-            content=f"[raw]\n{output}",
+            content=f"=== raw ===\n{output}",
             metadata={
                 "message_id": self._default_message_id,
                 "raw_output": True,
