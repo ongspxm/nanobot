@@ -218,7 +218,7 @@ If you suspect a security breach:
 
 ✅ **Resource Protection**
 - Command execution timeouts (60s default)
-- Output truncation (10KB limit)
+- Output truncation (5,000 character total limit with tail capped to last 3 lines or 1,000 chars)
 - HTTP request timeouts (10-30s)
 
 ✅ **Secure Communication**

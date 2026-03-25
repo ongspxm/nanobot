@@ -152,13 +152,8 @@ class ExecTool(Tool):
             full_result = "\n".join(output_parts) if output_parts else "(no output)"
 
             # Truncate very long output for tool return/session storage.
-            max_len = 10000
-            result_for_return = full_result
-            if len(result_for_return) > max_len:
-                result_for_return = (
-                    result_for_return[:max_len]
-                    + f"\n... (truncated, {len(result_for_return) - max_len} more chars)"
-                )
+            max_len = 5000
+            result_for_return = self._truncate_output_for_return(full_result, max_len)
 
             if raw_output:
                 # Raw mode sends the complete output to the channel, while the
@@ -197,6 +192,45 @@ class ExecTool(Tool):
         except Exception as e:
             return f"Error: Failed to send raw output: {e}"
         return f"Raw output sent to {self._default_channel}:{self._default_chat_id}"
+
+    def _truncate_output_for_return(self, full_result: str, max_len: int) -> str:
+        """Bound tool output while still surfacing truncation metadata and tail context."""
+        if len(full_result) <= max_len:
+            return full_result
+
+        tail_lines = full_result.splitlines()[-3:]
+        tail_block = "\n".join(tail_lines)
+        # Use at most the last 3 lines, additionally capped to the last 1000 chars.
+        max_tail_chars = 1000
+        if len(tail_block) > max_tail_chars:
+            tail_block = f"...{tail_block[-(max_tail_chars - 3) :]}"
+        tail_section_raw = (
+            f"\n--- tail (last 3 lines, max 1000 chars) ---\n{tail_block}" if tail_block else ""
+        )
+
+        truncation_note = "\n\n... (truncated, 0 more lines)"
+        # Recompute until note length and head cutoff agree.
+        for _ in range(3):
+            max_tail_section_len = max(0, max_len - len(truncation_note))
+            tail_section = tail_section_raw
+            if len(tail_section) > max_tail_section_len:
+                tail_section = tail_section[-max_tail_section_len:]
+
+            head_budget = max(0, max_len - len(truncation_note) - len(tail_section))
+            remaining_lines = len(full_result[head_budget:].splitlines())
+            line_label = "line" if remaining_lines == 1 else "lines"
+            updated_note = f"\n\n... (truncated, {remaining_lines} more {line_label})"
+            if updated_note == truncation_note:
+                break
+            truncation_note = updated_note
+
+        max_tail_section_len = max(0, max_len - len(truncation_note))
+        tail_section = tail_section_raw
+        if len(tail_section) > max_tail_section_len:
+            tail_section = tail_section[-max_tail_section_len:]
+        head_budget = max(0, max_len - len(truncation_note) - len(tail_section))
+        head = full_result[:head_budget]
+        return head + truncation_note + tail_section
 
     def _guard_command(self, command: str, cwd: str) -> str | None:
         """Best-effort safety guard for potentially destructive commands."""
