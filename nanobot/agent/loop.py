@@ -122,6 +122,15 @@ class AgentLoop:
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
 
+    @staticmethod
+    def _extract_slash_command(content: str) -> str | None:
+        """Return normalized slash command (supports Telegram /cmd@bot), else None."""
+        text = content.strip()
+        if not text.startswith("/"):
+            return None
+        token = text.split(maxsplit=1)[0].lower()
+        return token.split("@", 1)[0]
+
     async def _connect_mcp(self) -> None:
         """Connect to configured MCP servers (one-time, lazy)."""
         if self._mcp_connected or self._mcp_connecting or not self._mcp_servers:
@@ -293,7 +302,7 @@ class AgentLoop:
             except asyncio.TimeoutError:
                 continue
 
-            if msg.content.strip().lower() == "/stop":
+            if self._extract_slash_command(msg.content) == "/stop":
                 await self._handle_stop(msg)
             else:
                 task = asyncio.create_task(self._dispatch(msg))
@@ -423,13 +432,15 @@ class AgentLoop:
         session = self.sessions.get_or_create(key)
 
         # Slash commands
-        cmd = msg.content.strip().lower()
+        cmd = self._extract_slash_command(msg.content)
         if cmd == "/new":
             lock = self._get_consolidation_lock(session.key)
             self._consolidating.add(session.key)
+            consolidated_count = 0
             try:
                 async with lock:
                     snapshot = session.messages[session.last_consolidated :]
+                    consolidated_count = len(snapshot)
                     if snapshot:
                         temp = Session(key=session.key)
                         temp.messages = list(snapshot)
@@ -455,10 +466,13 @@ class AgentLoop:
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
+            details = (
+                f" ({consolidated_count} messages consolidated)" if consolidated_count > 0 else ""
+            )
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content="New session started.",
+                content=f"New session started.{details}",
                 metadata=self._with_session_metadata(msg.metadata, key),
             )
         if cmd == "/help":

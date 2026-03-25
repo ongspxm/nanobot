@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import re
+from contextlib import ExitStack
 
 from loguru import logger
-from telegram import BotCommand, ReplyParameters, Update
+from telegram import BotCommand, InputMediaPhoto, ReplyParameters, Update
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -222,6 +223,7 @@ class TelegramChannel(BaseChannel):
         # Add command handlers
         self._app.add_handler(CommandHandler("start", self._on_start))
         self._app.add_handler(CommandHandler("new", self._forward_command))
+        self._app.add_handler(CommandHandler("stop", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
         self._app.add_handler(MessageReactionHandler(self._on_reaction))
 
@@ -293,6 +295,71 @@ class TelegramChannel(BaseChannel):
             return "audio"
         return "document"
 
+    async def _send_single_media(
+        self,
+        chat_id: int,
+        media_path: str,
+        reply_params: ReplyParameters | None,
+    ) -> None:
+        """Send one media file with best-effort fallback message on failure."""
+        if not self._app:
+            return
+        try:
+            media_type = self._get_media_type(media_path)
+            sender = {
+                "photo": self._app.bot.send_photo,
+                "voice": self._app.bot.send_voice,
+                "audio": self._app.bot.send_audio,
+            }.get(media_type, self._app.bot.send_document)
+            param = (
+                "photo"
+                if media_type == "photo"
+                else media_type
+                if media_type in ("voice", "audio")
+                else "document"
+            )
+            with open(media_path, "rb") as f:
+                await sender(chat_id=chat_id, **{param: f}, reply_parameters=reply_params)
+        except Exception as e:
+            filename = media_path.rsplit("/", 1)[-1]
+            logger.error("Failed to send media {}: {}", media_path, e)
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=f"[Failed to send: {filename}]",
+                reply_parameters=reply_params,
+                disable_web_page_preview=True,
+            )
+
+    async def _send_photo_album(
+        self,
+        chat_id: int,
+        media_paths: list[str],
+        reply_params: ReplyParameters | None,
+    ) -> None:
+        """Send photos in Telegram albums (2-10 items per request)."""
+        if not self._app:
+            return
+        for i in range(0, len(media_paths), 10):
+            group = media_paths[i : i + 10]
+            if len(group) == 1:
+                await self._send_single_media(chat_id, group[0], reply_params)
+                continue
+            try:
+                with ExitStack() as stack:
+                    payload = [
+                        InputMediaPhoto(media=stack.enter_context(open(path, "rb")))
+                        for path in group
+                    ]
+                    await self._app.bot.send_media_group(
+                        chat_id=chat_id,
+                        media=payload,
+                        reply_parameters=reply_params,
+                    )
+            except Exception as e:
+                logger.error("Failed to send media group ({} items): {}", len(group), e)
+                for path in group:
+                    await self._send_single_media(chat_id, path, reply_params)
+
     async def send(self, msg: OutboundMessage) -> None:
         """Send a message through Telegram."""
         if not self._app:
@@ -315,33 +382,24 @@ class TelegramChannel(BaseChannel):
                     message_id=reply_to_message_id, allow_sending_without_reply=True
                 )
 
-        # Send media files
-        for media_path in msg.media or []:
-            try:
-                media_type = self._get_media_type(media_path)
-                sender = {
-                    "photo": self._app.bot.send_photo,
-                    "voice": self._app.bot.send_voice,
-                    "audio": self._app.bot.send_audio,
-                }.get(media_type, self._app.bot.send_document)
-                param = (
-                    "photo"
-                    if media_type == "photo"
-                    else media_type
-                    if media_type in ("voice", "audio")
-                    else "document"
-                )
-                with open(media_path, "rb") as f:
-                    await sender(chat_id=chat_id, **{param: f}, reply_parameters=reply_params)
-            except Exception as e:
-                filename = media_path.rsplit("/", 1)[-1]
-                logger.error("Failed to send media {}: {}", media_path, e)
-                await self._app.bot.send_message(
-                    chat_id=chat_id,
-                    text=f"[Failed to send: {filename}]",
-                    reply_parameters=reply_params,
-                    disable_web_page_preview=True,
-                )
+        # Send media files. Consecutive photos are sent as album(s) in one shot.
+        media_paths = msg.media or []
+        idx = 0
+        while idx < len(media_paths):
+            path = media_paths[idx]
+            if self._get_media_type(path) != "photo":
+                await self._send_single_media(chat_id, path, reply_params)
+                idx += 1
+                continue
+
+            photo_group = [path]
+            j = idx + 1
+            while j < len(media_paths) and self._get_media_type(media_paths[j]) == "photo":
+                photo_group.append(media_paths[j])
+                j += 1
+
+            await self._send_photo_album(chat_id, photo_group, reply_params)
+            idx = j
 
         # Send text content
         if msg.content and msg.content != "[empty message]":
@@ -567,7 +625,9 @@ class TelegramChannel(BaseChannel):
 
         str_chat_id = str(chat_id)
         session_key = self._reply_session_key(message)
-        reply_to_message_id = message.reply_to_message.message_id if message.reply_to_message else None
+        reply_to_message_id = (
+            message.reply_to_message.message_id if message.reply_to_message else None
+        )
         if session_key:
             logger.debug("Telegram reply routed to session {}", session_key)
 
