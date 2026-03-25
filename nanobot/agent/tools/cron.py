@@ -40,6 +40,7 @@ class CronTool(Tool):
                     "description": "Action to perform",
                 },
                 "message": {"type": "string", "description": "Reminder message (for add)"},
+                "name": {"type": "string", "description": "Job name (for edit)"},
                 "every_seconds": {
                     "type": "integer",
                     "description": "Interval in seconds (for recurring tasks)",
@@ -65,6 +66,7 @@ class CronTool(Tool):
         self,
         action: str,
         message: str = "",
+        name: str = "",
         every_seconds: int | None = None,
         cron_expr: str | None = None,
         tz: str | None = None,
@@ -79,7 +81,7 @@ class CronTool(Tool):
         elif action == "remove":
             return self._remove_job(job_id)
         elif action == "edit":
-            return self._edit_job(job_id, message, cron_expr)
+            return self._edit_job(job_id, name, message, cron_expr)
         return f"Unknown action: {action}"
 
     def _add_job(
@@ -170,17 +172,23 @@ class CronTool(Tool):
             return f"Removed job {job_id}"
         return f"Job {job_id} not found"
 
-    def _edit_job(self, job_id: str | None, message: str, cron_expr: str | None) -> str:
+    def _edit_job(self, job_id: str | None, name: str, message: str, cron_expr: str | None) -> str:
         if not job_id:
             return "Error: job_id is required for edit"
 
+        name_update: str | None = name if name else None
         message_update: str | None = message if message else None
         cron_update: str | None = cron_expr if cron_expr else None
-        if message_update is None and cron_update is None:
-            return "Error: provide message and/or cron_expr for edit"
+        if name_update is None and message_update is None and cron_update is None:
+            return "Error: provide name, message, and/or cron_expr for edit"
 
         try:
-            job = self._cron.edit_job(job_id=job_id, message=message_update, cron_expr=cron_update)
+            job = self._cron.edit_job(
+                job_id=job_id,
+                name=name_update,
+                message=message_update,
+                cron_expr=cron_update,
+            )
         except ValueError as e:
             return f"Error: {e}"
 
@@ -188,6 +196,8 @@ class CronTool(Tool):
             return f"Job {job_id} not found"
 
         updates: list[str] = []
+        if name_update is not None:
+            updates.append("name")
         if message_update is not None:
             updates.append("message")
         if cron_update is not None:

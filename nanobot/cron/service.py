@@ -354,23 +354,27 @@ class CronService:
     def edit_job(
         self,
         job_id: str,
+        name: str | None = None,
         message: str | None = None,
         cron_expr: str | None = None,
     ) -> CronJob | None:
-        """Edit an existing job's message and/or cron expression."""
-        if message is None and cron_expr is None:
-            raise ValueError("at least one of message or cron_expr is required")
+        """Edit an existing job's name, message, and/or cron expression."""
+        if name is None and message is None and cron_expr is None:
+            raise ValueError("at least one of name, message, or cron_expr is required")
 
         store = self._load_store()
         for job in store.jobs:
             if job.id != job_id:
                 continue
 
+            if name is not None:
+                if not name.strip():
+                    raise ValueError("name cannot be empty")
+                job.name = name.strip() or name
+
             if message is not None:
                 if not message.strip():
                     raise ValueError("message cannot be empty")
-                # Keep name aligned with message, same behavior as add.
-                job.name = message.strip() or message
                 job.payload.message = message
 
             if cron_expr is not None:
