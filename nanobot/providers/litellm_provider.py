@@ -6,6 +6,7 @@ from typing import Any
 import json_repair
 import litellm
 from litellm import acompletion
+from loguru import logger
 
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.providers.registry import find_by_model, find_gateway
@@ -161,10 +162,83 @@ class LiteLLMProvider(LLMProvider):
         for msg in messages:
             clean = {k: v for k, v in msg.items() if k in _ALLOWED_MSG_KEYS}
             # Strict providers require "content" even when assistant only has tool_calls
-            if clean.get("role") == "assistant" and "content" not in clean:
-                clean["content"] = None
+            if clean.get("role") == "assistant":
+                # Empty tool_calls arrays are protocol-noise and can trigger
+                # strict-provider validation failures.
+                if isinstance(clean.get("tool_calls"), list) and not clean["tool_calls"]:
+                    clean.pop("tool_calls", None)
+                if "content" not in clean:
+                    clean["content"] = None
             sanitized.append(clean)
         return sanitized
+
+    @staticmethod
+    def _repair_tool_message_sequence(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Repair malformed tool-call transcripts before sending to strict providers.
+
+        Some providers reject any `tool` role message unless it directly responds to
+        an earlier assistant `tool_calls` entry. This repair pass drops orphaned tool
+        messages and trims incomplete tool-call blocks so the transcript is always
+        protocol-valid.
+        """
+        repaired: list[dict[str, Any]] = []
+        pending_call_ids: set[str] = set()
+        open_block_start: int | None = None
+
+        for msg in messages:
+            role = msg.get("role")
+
+            if role == "tool":
+                tool_call_id = msg.get("tool_call_id")
+                if not pending_call_ids:
+                    logger.debug("Dropping orphan tool message without pending tool calls")
+                    continue
+                if not isinstance(tool_call_id, str) or tool_call_id not in pending_call_ids:
+                    logger.debug(
+                        "Dropping tool message with unknown tool_call_id: {}",
+                        tool_call_id,
+                    )
+                    continue
+
+                repaired.append(msg)
+                pending_call_ids.remove(tool_call_id)
+                if not pending_call_ids:
+                    open_block_start = None
+                continue
+
+            if pending_call_ids:
+                # Non-tool message arrived while some tool responses are missing.
+                # Trim the dangling tool-call block (assistant + partial tool outputs).
+                logger.debug("Trimming incomplete assistant tool-call block")
+                if open_block_start is not None:
+                    repaired = repaired[:open_block_start]
+                pending_call_ids.clear()
+                open_block_start = None
+
+            if role == "assistant" and isinstance(msg.get("tool_calls"), list):
+                valid_calls = [
+                    tc
+                    for tc in msg["tool_calls"]
+                    if isinstance(tc, dict) and isinstance(tc.get("id"), str) and tc["id"]
+                ]
+                clean = dict(msg)
+                if valid_calls:
+                    clean["tool_calls"] = valid_calls
+                else:
+                    clean.pop("tool_calls", None)
+                repaired.append(clean)
+                if valid_calls:
+                    pending_call_ids = {tc["id"] for tc in valid_calls}
+                    open_block_start = len(repaired) - 1
+                continue
+
+            repaired.append(msg)
+
+        if pending_call_ids and open_block_start is not None:
+            logger.debug("Dropping trailing incomplete assistant tool-call block")
+            repaired = repaired[:open_block_start]
+
+        return repaired
 
     async def chat(
         self,
@@ -199,7 +273,9 @@ class LiteLLMProvider(LLMProvider):
 
         kwargs: dict[str, Any] = {
             "model": model,
-            "messages": self._sanitize_messages(self._sanitize_empty_content(messages)),
+            "messages": self._sanitize_messages(
+                self._sanitize_empty_content(self._repair_tool_message_sequence(messages))
+            ),
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
