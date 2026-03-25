@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Coroutine
 
 from loguru import logger
+
+from nanobot.agent.memory import MemoryStore
+from nanobot.session.manager import SessionManager
 
 if TYPE_CHECKING:
     from nanobot.providers.base import LLMProvider
@@ -59,6 +63,8 @@ class HeartbeatService:
         on_notify: Callable[[str], Coroutine[Any, Any, None]] | None = None,
         interval_s: int = 30 * 60,
         enabled: bool = True,
+        idle_close_after_hours: int = 48,
+        session_manager: SessionManager | None = None,
     ):
         self.workspace = workspace
         self.provider = provider
@@ -67,8 +73,64 @@ class HeartbeatService:
         self.on_notify = on_notify
         self.interval_s = interval_s
         self.enabled = enabled
+        self.idle_close_after = timedelta(hours=idle_close_after_hours)
+        self._session_manager = session_manager
         self._running = False
         self._task: asyncio.Task | None = None
+
+    async def _archive_and_close_idle_sessions(self) -> tuple[int, int]:
+        """Archive and clear sessions whose last update is older than the idle threshold."""
+        now = datetime.now().astimezone()
+        default_tz = now.tzinfo or timezone.utc
+        cutoff_ts = (now - self.idle_close_after).timestamp()
+        sessions = self._session_manager or SessionManager(self.workspace)
+        memory = MemoryStore(self.workspace)
+
+        closed = 0
+        failed = 0
+
+        for item in sessions.list_sessions():
+            key = str(item.get("key") or "").strip()
+            if not key or key == "heartbeat":
+                continue
+            updated_raw = item.get("updated_at")
+            if not updated_raw:
+                continue
+
+            try:
+                updated_at = datetime.fromisoformat(str(updated_raw))
+            except ValueError:
+                continue
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=default_tz)
+            updated_at_ts = updated_at.timestamp()
+            if updated_at_ts > cutoff_ts:
+                continue
+
+            session = sessions.get_or_create(key)
+            if not session.messages:
+                continue
+
+            archived_count = len(session.messages)
+            ok = await memory.consolidate(
+                session,
+                self.provider,
+                self.model,
+                archive_all=True,
+            )
+            if not ok:
+                failed += 1
+                continue
+
+            session.clear()
+            session.metadata["closed_reason"] = "heartbeat_idle"
+            session.metadata["closed_at"] = now.isoformat()
+            session.metadata["closed_archived_messages"] = archived_count
+            sessions.save(session)
+            sessions.invalidate(key)
+            closed += 1
+
+        return closed, failed
 
     @property
     def heartbeat_file(self) -> Path:
@@ -145,6 +207,10 @@ class HeartbeatService:
 
     async def _tick(self) -> None:
         """Execute a single heartbeat tick."""
+        closed, failed = await self._archive_and_close_idle_sessions()
+        if closed or failed:
+            logger.info("Heartbeat: idle session cleanup closed={}, failed={}", closed, failed)
+
         content = self._read_heartbeat_file()
         if not content:
             logger.debug("Heartbeat: HEARTBEAT.md missing or empty")
@@ -170,6 +236,10 @@ class HeartbeatService:
 
     async def trigger_now(self) -> str | None:
         """Manually trigger a heartbeat."""
+        closed, failed = await self._archive_and_close_idle_sessions()
+        if closed or failed:
+            logger.info("Heartbeat: idle session cleanup closed={}, failed={}", closed, failed)
+
         content = self._read_heartbeat_file()
         if not content:
             return None
