@@ -6,6 +6,7 @@ import asyncio
 import json
 import re
 from contextlib import AsyncExitStack
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Awaitable, Callable
 
@@ -430,6 +431,25 @@ class AgentLoop:
 
         key = session_key or msg.session_key
         session = self.sessions.get_or_create(key)
+        if (
+            msg.channel == "telegram"
+            and session_key is None
+            and msg.session_key_override is None
+            and not msg.metadata.get("reply_to_message_id")
+            and session.messages
+        ):
+            last_message_at = datetime.fromisoformat(session.messages[-1]["timestamp"])
+            if datetime.now() - last_message_at > timedelta(hours=8):
+                session.clear()
+                self.sessions.save(session)
+                await self.bus.publish_outbound(
+                    OutboundMessage(
+                        channel=msg.channel,
+                        chat_id=msg.chat_id,
+                        content="🆕 A fresh chat has been started after 8 hours of inactivity.",
+                        metadata=self._with_session_metadata(msg.metadata, key),
+                    )
+                )
 
         # Slash commands
         cmd = self._extract_slash_command(msg.content)
@@ -604,8 +624,13 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         on_progress: Callable[[str], Awaitable[None]] | None = None,
+        fresh_session: bool = False,
     ) -> str:
-        """Process a message directly (for CLI or cron usage)."""
+        """Process a message directly, optionally clearing its history first."""
+        if fresh_session:
+            session = self.sessions.get_or_create(session_key)
+            session.clear()
+            self.sessions.save(session)
         await self._connect_mcp()
         msg = InboundMessage(channel=channel, sender_id="user", chat_id=chat_id, content=content)
         response = await self._process_message(

@@ -354,6 +354,7 @@ def gateway(
             session_key=session_key,
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            fresh_session=True,
         )
         if job.payload.deliver and job.payload.to:
             from nanobot.bus.events import OutboundMessage
@@ -1117,6 +1118,7 @@ def cron_run(
             session_key=f"cron:{job.id}",
             channel=job.payload.channel or "cli",
             chat_id=job.payload.to or "direct",
+            fresh_session=True,
         )
         result_holder.append(response)
         raw_delivered = await _drain_and_deliver_outbound(job)
