@@ -102,22 +102,19 @@
 **Install from source** (latest features, recommended for development)
 
 ```bash
-git clone https://github.com/HKUDS/nanobot.git
+git clone https://github.com/ongspxm/nanobot.git
 cd nanobot
 pip install -e .
 ```
 
-**Install with [uv](https://github.com/astral-sh/uv)** (stable, fast)
+**Install with [uv](https://github.com/astral-sh/uv)** (isolated, global-ish)
 
 ```bash
-uv tool install nanobot-ai
+uv tool install --editable .  # this checkout
+# or: uv tool install nanobot-ai  # PyPI
 ```
 
-**Install from PyPI** (stable)
-
-```bash
-pip install nanobot-ai
-```
+> CLI is `mobot`. Package/import/config names stay `nanobot-ai` / `nanobot`.
 
 ## 🚀 Quick Start
 
@@ -128,7 +125,7 @@ pip install nanobot-ai
 **1. Initialize**
 
 ```bash
-nanobot onboard
+mobot onboard
 ```
 
 **2. Configure** (`~/.nanobot/config.json`)
@@ -161,7 +158,7 @@ Add or merge these **two parts** into your config (other options have defaults).
 **3. Chat**
 
 ```bash
-nanobot agent
+mobot agent
 ```
 
 That's it! You have a working AI assistant in 2 minutes.
@@ -211,7 +208,7 @@ Connect nanobot to your favorite chat platform.
 **3. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -234,7 +231,7 @@ nanobot will automatically register, configure `~/.nanobot/config.json`, and con
 **2. Restart gateway**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 That's it — nanobot handles the rest!
@@ -312,7 +309,7 @@ If you prefer to configure manually, add the following to `~/.nanobot/config.jso
 **6. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -378,7 +375,7 @@ pip install nanobot-ai[matrix]
 **4. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -391,7 +388,7 @@ Requires **Node.js ≥18**.
 **1. Link device**
 
 ```bash
-nanobot channels login
+mobot channels login
 # Scan QR with WhatsApp → Settings → Linked Devices
 ```
 
@@ -412,10 +409,10 @@ nanobot channels login
 
 ```bash
 # Terminal 1
-nanobot channels login
+mobot channels login
 
 # Terminal 2
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -457,7 +454,7 @@ Uses **WebSocket** long connection — no public IP required.
 **3. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 > [!TIP]
@@ -501,7 +498,7 @@ Uses **botpy SDK** with WebSocket — no public IP required. Currently supports 
 **4. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 Now send a message to the bot from QQ — it should respond!
@@ -542,7 +539,7 @@ Uses **Stream Mode** — no public IP required.
 **3. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -581,7 +578,7 @@ Uses **Socket Mode** — no public URL required.
 **4. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 DM the bot directly or @mention it in a channel — it should respond!
@@ -634,7 +631,7 @@ Give nanobot its own email account. It polls **IMAP** for incoming mail and repl
 **3. Run**
 
 ```bash
-nanobot gateway
+mobot gateway
 ```
 
 </details>
@@ -678,9 +675,26 @@ Config file: `~/.nanobot/config.json`
 | `dashscope` | LLM (Qwen) | [dashscope.console.aliyun.com](https://dashscope.console.aliyun.com) |
 | `moonshot` | LLM (Moonshot/Kimi) | [platform.moonshot.cn](https://platform.moonshot.cn) |
 | `zhipu` | LLM (Zhipu GLM) | [open.bigmodel.cn](https://open.bigmodel.cn) |
+
+For Gemini thinking controls, add provider-specific request options:
+```json
+{
+  "providers": {
+    "gemini": {
+      "apiKey": "YOUR_GEMINI_API_KEY",
+      "extraBody": {
+        "google": {
+          "thinking_config": { "thinking_budget": 4096 }
+        }
+      }
+    }
+  }
+}
+```
+Use `thinking_level` (`"minimal"`, `"low"`, `"medium"`, or `"high"`) instead of `thinking_budget` for Gemini 3 models.
 | `vllm` | LLM (local, any OpenAI-compatible server) | — |
-| `openai_codex` | LLM (Codex, OAuth) | `nanobot provider login openai-codex` |
-| `github_copilot` | LLM (GitHub Copilot, OAuth) | `nanobot provider login github-copilot` |
+| `openai_codex` | LLM (Codex, OAuth) | `mobot provider login openai-codex` |
+| `github_copilot` | LLM (GitHub Copilot, OAuth) | `mobot provider login github-copilot` |
 
 <details>
 <summary><b>OpenAI Codex (OAuth)</b></summary>
@@ -689,7 +703,7 @@ Codex uses OAuth instead of API keys. Requires a ChatGPT Plus or Pro account.
 
 **1. Login:**
 ```bash
-nanobot provider login openai-codex
+mobot provider login openai-codex
 ```
 
 **2. Set model** (merge into `~/.nanobot/config.json`):
@@ -705,7 +719,7 @@ nanobot provider login openai-codex
 
 **3. Chat:**
 ```bash
-nanobot agent -m "Hello!"
+mobot agent -m "Hello!"
 ```
 
 > Docker users: use `docker run -it` for interactive OAuth login.
@@ -787,7 +801,7 @@ ProviderSpec(
     name="myprovider",                   # config field name
     keywords=("myprovider", "mymodel"),  # model-name keywords for auto-matching
     env_key="MYPROVIDER_API_KEY",        # env var for LiteLLM
-    display_name="My Provider",          # shown in `nanobot status`
+    display_name="My Provider",          # shown in `mobot status`
     litellm_prefix="myprovider",         # auto-prefix: model → myprovider/model
     skip_prefixes=("myprovider/",),      # don't double-prefix
 )
@@ -801,7 +815,7 @@ class ProvidersConfig(BaseModel):
     myprovider: ProviderConfig = ProviderConfig()
 ```
 
-That's it! Environment variables, model prefixing, config matching, and `nanobot status` display will all work automatically.
+That's it! Environment variables, model prefixing, config matching, and `mobot status` display work automatically.
 
 **Common `ProviderSpec` options:**
 
@@ -890,16 +904,16 @@ MCP tools are automatically discovered and registered on startup. The LLM can us
 
 | Command | Description |
 |---------|-------------|
-| `nanobot onboard` | Initialize config & workspace |
-| `nanobot agent -m "..."` | Chat with the agent |
-| `nanobot agent` | Interactive chat mode |
-| `nanobot agent --no-markdown` | Show plain-text replies |
-| `nanobot agent --logs` | Show runtime logs during chat |
-| `nanobot gateway` | Start the gateway |
-| `nanobot status` | Show status |
-| `nanobot provider login openai-codex` | OAuth login for providers |
-| `nanobot channels login` | Link WhatsApp (scan QR) |
-| `nanobot channels status` | Show channel status |
+| `mobot onboard` | Initialize config & workspace |
+| `mobot agent -m "..."` | Chat with the agent |
+| `mobot agent` | Interactive chat mode |
+| `mobot agent --no-markdown` | Show plain-text replies |
+| `mobot agent --logs` | Show runtime logs during chat |
+| `mobot gateway` | Start the gateway |
+| `mobot status` | Show status |
+| `mobot provider login openai-codex` | OAuth login for providers |
+| `mobot channels login` | Link WhatsApp (scan QR) |
+| `mobot channels status` | Show channel status |
 
 Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
@@ -908,14 +922,14 @@ Interactive mode exits: `exit`, `quit`, `/exit`, `/quit`, `:q`, or `Ctrl+D`.
 
 ```bash
 # Add a job
-nanobot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
-nanobot cron add --name "hourly" --message "Check status" --every 3600
+mobot cron add --name "daily" --message "Good morning!" --cron "0 9 * * *"
+mobot cron add --name "hourly" --message "Check status" --every 3600
 
 # List jobs
-nanobot cron list
+mobot cron list
 
 # Remove a job
-nanobot cron remove <job_id>
+mobot cron remove <job_id>
 ```
 
 </details>
@@ -925,7 +939,7 @@ nanobot cron remove <job_id>
 
 The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspace (`~/.nanobot/workspace/HEARTBEAT.md`). If the file has tasks, the agent executes them and delivers results to your most recently active chat channel.
 
-**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `nanobot onboard`):
+**Setup:** edit `~/.nanobot/workspace/HEARTBEAT.md` (created automatically by `mobot onboard`):
 
 ```markdown
 ## Periodic Tasks
@@ -936,7 +950,7 @@ The gateway wakes up every 30 minutes and checks `HEARTBEAT.md` in your workspac
 
 The agent can also manage this file itself — ask it to "add a periodic task" and it will update `HEARTBEAT.md` for you.
 
-> **Note:** The gateway must be running (`nanobot gateway`) and you must have chatted with the bot at least once so it knows which channel to deliver to.
+> **Note:** The gateway must be running (`mobot gateway`) and you must have chatted with the bot at least once so it knows where to deliver.
 
 </details>
 
@@ -963,30 +977,30 @@ docker compose down                                      # stop
 
 ```bash
 # Build the image
-docker build -t nanobot .
+docker build -t mobot .
 
 # Initialize config (first time only)
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot onboard
+docker run -v ~/.nanobot:/root/.nanobot --rm mobot onboard
 
 # Edit config on host to add API keys
 vim ~/.nanobot/config.json
 
 # Run gateway (connects to enabled channels, e.g. Telegram/Discord/Mochat)
-docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 nanobot gateway
+docker run -v ~/.nanobot:/root/.nanobot -p 18790:18790 mobot gateway
 
 # Or run a single command
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
-docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
+docker run -v ~/.nanobot:/root/.nanobot --rm mobot agent -m "Hello!"
+docker run -v ~/.nanobot:/root/.nanobot --rm mobot status
 ```
 
 ## 🐧 Linux Service
 
 Run the gateway as a systemd user service so it starts automatically and restarts on failure.
 
-**1. Find the nanobot binary path:**
+**1. Find the mobot binary path:**
 
 ```bash
-which nanobot   # e.g. /home/user/.local/bin/nanobot
+which mobot   # e.g. /home/user/.local/bin/mobot
 ```
 
 **2. Create the service file** at `~/.config/systemd/user/nanobot-gateway.service` (replace `ExecStart` path if needed):
@@ -998,7 +1012,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/nanobot gateway
+ExecStart=%h/.local/bin/mobot gateway
 Restart=always
 RestartSec=10
 NoNewPrivileges=yes

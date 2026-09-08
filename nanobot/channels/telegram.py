@@ -431,7 +431,12 @@ class TelegramChannel(BaseChannel):
                             chunk,
                         )
                     except Exception as e:
-                        logger.error("Error sending Telegram raw message: {}", e)
+                        logger.error(
+                            "telegram.send_failed chat_id={} mode=raw error_type={} error={}",
+                            chat_id,
+                            type(e).__name__,
+                            e,
+                        )
                     continue
                 try:
                     html = _markdown_to_telegram_html(chunk)
@@ -451,7 +456,12 @@ class TelegramChannel(BaseChannel):
                         chunk,
                     )
                 except Exception as e:
-                    logger.warning("HTML parse failed, falling back to plain text: {}", e)
+                    logger.warning(
+                        "telegram.send_retry chat_id={} mode=plain reason_type={} reason={}",
+                        chat_id,
+                        type(e).__name__,
+                        e,
+                    )
                     try:
                         sent = await self._app.bot.send_message(
                             chat_id=chat_id,
@@ -468,7 +478,12 @@ class TelegramChannel(BaseChannel):
                             chunk,
                         )
                     except Exception as e2:
-                        logger.error("Error sending Telegram message: {}", e2)
+                        logger.error(
+                            "telegram.send_failed chat_id={} mode=plain error_type={} error={}",
+                            chat_id,
+                            type(e2).__name__,
+                            e2,
+                        )
 
     def _remember_session_reference(
         self,
@@ -621,7 +636,13 @@ class TelegramChannel(BaseChannel):
 
         content = "\n".join(content_parts) if content_parts else "[empty message]"
 
-        logger.debug("Telegram message from {}: {}...", sender_id, content[:50])
+        logger.info(
+            "telegram.message_received sender_id={} chat_id={} content_chars={} has_media={}",
+            sender_id,
+            chat_id,
+            len(content),
+            bool(media_paths),
+        )
 
         str_chat_id = str(chat_id)
         session_key = self._reply_session_key(message)
@@ -709,7 +730,13 @@ class TelegramChannel(BaseChannel):
 
     async def _on_error(self, update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Log polling / handler errors instead of silently swallowing them."""
-        logger.error("Telegram error: {}", context.error)
+        error = context.error
+        logger.error(
+            "telegram.update_failed update_type={} error_type={} error={}",
+            type(update).__name__,
+            type(error).__name__ if error else "UnknownError",
+            error or "unknown Telegram error",
+        )
 
     def _get_extension(self, media_type: str, mime_type: str | None) -> str:
         """Get file extension based on media type."""

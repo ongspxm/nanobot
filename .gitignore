@@ -1,5 +1,4 @@
-.assets
-.env
+.*
 *.pyc
 dist/
 build/
@@ -13,13 +12,10 @@ docs/
 *.pyz
 *.pywz
 *.pyzz
-.venv/
 venv/
 __pycache__/
 poetry.lock
-.pytest_cache/
 botpy.log
 tests/
-.code/
 *.swp
 !.pre-commit-config.yaml

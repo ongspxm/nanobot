@@ -33,11 +33,13 @@ class LiteLLMProvider(LLMProvider):
         api_base: str | None = None,
         default_model: str = "anthropic/claude-opus-4-5",
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         provider_name: str | None = None,
     ):
         super().__init__(api_key, api_base)
         self.default_model = default_model
         self.extra_headers = extra_headers or {}
+        self.extra_body = extra_body or {}
 
         # Detect gateway / local deployment.
         # provider_name (from config key) is the primary signal;
@@ -290,6 +292,10 @@ class LiteLLMProvider(LLMProvider):
         # Pass api_base for custom endpoints
         if self.api_base:
             kwargs["api_base"] = self.api_base
+
+        # Pass provider-specific request options (e.g. Gemini thinking config)
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
 
         # Pass extra headers (e.g. APP-Code for AiHubMix)
         if self.extra_headers:

@@ -1,7 +1,7 @@
 """Configuration schema using Pydantic."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic.alias_generators import to_camel
@@ -240,6 +240,7 @@ class ProviderConfig(Base):
     api_key: str = ""
     api_base: str | None = None
     extra_headers: dict[str, str] | None = None  # Custom headers (e.g. APP-Code for AiHubMix)
+    extra_body: dict[str, Any] | None = None  # Provider-specific request options
 
 
 class ProvidersConfig(Base):
