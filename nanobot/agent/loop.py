@@ -454,45 +454,13 @@ class AgentLoop:
         # Slash commands
         cmd = self._extract_slash_command(msg.content)
         if cmd == "/new":
-            lock = self._get_consolidation_lock(session.key)
-            self._consolidating.add(session.key)
-            consolidated_count = 0
-            try:
-                async with lock:
-                    snapshot = session.messages[session.last_consolidated :]
-                    consolidated_count = len(snapshot)
-                    if snapshot:
-                        temp = Session(key=session.key)
-                        temp.messages = list(snapshot)
-                        if not await self._consolidate_memory(temp, archive_all=True):
-                            return OutboundMessage(
-                                channel=msg.channel,
-                                chat_id=msg.chat_id,
-                                content="Memory archival failed, session not cleared. Please try again.",
-                                metadata=self._with_session_metadata(msg.metadata, key),
-                            )
-            except Exception:
-                logger.exception("/new archival failed for {}", session.key)
-                return OutboundMessage(
-                    channel=msg.channel,
-                    chat_id=msg.chat_id,
-                    content="Memory archival failed, session not cleared. Please try again.",
-                    metadata=self._with_session_metadata(msg.metadata, key),
-                )
-            finally:
-                self._consolidating.discard(session.key)
-                self._prune_consolidation_lock(session.key, lock)
-
             session.clear()
             self.sessions.save(session)
             self.sessions.invalidate(session.key)
-            details = (
-                f" ({consolidated_count} messages consolidated)" if consolidated_count > 0 else ""
-            )
             return OutboundMessage(
                 channel=msg.channel,
                 chat_id=msg.chat_id,
-                content=f"New session started.{details}",
+                content="New session started.",
                 metadata=self._with_session_metadata(msg.metadata, key),
             )
         if cmd == "/help":
