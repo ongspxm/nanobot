@@ -267,6 +267,7 @@ class ProvidersConfig(Base):
     )  # VolcEngine (火山引擎) API gateway
     openai_codex: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenAI Codex (OAuth)
     github_copilot: ProviderConfig = Field(default_factory=ProviderConfig)  # Github Copilot (OAuth)
+    zen: ProviderConfig = Field(default_factory=ProviderConfig)  # OpenCode Zen (Responses API)
 
 
 class HeartbeatConfig(Base):

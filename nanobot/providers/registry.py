@@ -79,6 +79,14 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         litellm_prefix="",
         is_direct=True,
     ),
+    # OpenCode Zen (direct Responses API)
+    ProviderSpec(
+        name="zen",
+        keywords=("zen", "muse-spark"),
+        env_key="",
+        display_name="OpenCode Zen",
+        is_direct=True,
+    ),
     # === Gateways (detected by api_key / api_base, not model name) =========
     # Gateways can route any model, so they win in fallback.
     # OpenRouter: global gateway, keys start with "sk-or-"
