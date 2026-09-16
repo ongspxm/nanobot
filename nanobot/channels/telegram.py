@@ -404,8 +404,8 @@ class TelegramChannel(BaseChannel):
         # Send text content
         if msg.content and msg.content != "[empty message]":
             raw_output = bool(msg.metadata.get("raw_output"))
-            content = _prepend_session_prefix(msg.content, msg.chat_id, msg.metadata)
-            chunks = _numbered_chunks(content) if len(content) > 4000 else [content]
+            raw_chunks = _numbered_chunks(msg.content) if len(msg.content) > 4000 else [msg.content]
+            chunks = [_prepend_session_prefix(c, msg.chat_id, msg.metadata) for c in raw_chunks]
             head_message_id: int | None = None
             for idx, chunk in enumerate(chunks):
                 chunk_reply_params = reply_params
