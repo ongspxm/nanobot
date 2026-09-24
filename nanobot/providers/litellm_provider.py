@@ -1,5 +1,6 @@
 """LiteLLM provider implementation for multi-provider support."""
 
+import asyncio
 import os
 from typing import Any
 
@@ -16,6 +17,15 @@ from nanobot.providers.registry import find_by_model, find_gateway
 _ALLOWED_MSG_KEYS = frozenset(
     {"role", "content", "tool_calls", "tool_call_id", "name", "reasoning_content"}
 )
+
+
+GEMINI_RETRY_ATTEMPTS = 3
+GEMINI_RETRY_DELAY_S = 60.0
+
+
+def _is_gemini_overload(exc: Exception, model: str) -> bool:
+    text = str(exc).lower()
+    return "gemini" in model.lower() and "503" in text and "high demand" in text
 
 
 class LiteLLMProvider(LLMProvider):
@@ -305,15 +315,23 @@ class LiteLLMProvider(LLMProvider):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
-        try:
-            response = await acompletion(**kwargs)
-            return self._parse_response(response)
-        except Exception as e:
-            # Return error as content for graceful handling
-            return LLMResponse(
-                content=f"Error calling LLM: {str(e)}",
-                finish_reason="error",
-            )
+        for attempt in range(GEMINI_RETRY_ATTEMPTS + 1):
+            try:
+                response = await acompletion(**kwargs)
+                return self._parse_response(response)
+            except Exception as e:
+                if not _is_gemini_overload(e, original_model) or attempt >= GEMINI_RETRY_ATTEMPTS:
+                    return LLMResponse(
+                        content=f"Error calling LLM: {str(e)}",
+                        finish_reason="error",
+                    )
+                logger.warning(
+                    "Gemini unavailable, retrying in {}s (attempt {}/{})",
+                    GEMINI_RETRY_DELAY_S,
+                    attempt + 1,
+                    GEMINI_RETRY_ATTEMPTS,
+                )
+                await asyncio.sleep(GEMINI_RETRY_DELAY_S)
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
