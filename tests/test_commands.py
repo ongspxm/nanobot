@@ -1,5 +1,6 @@
 import shutil
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -7,6 +8,7 @@ from typer.testing import CliRunner
 
 from nanobot.cli.commands import app
 from nanobot.config.schema import Config
+from nanobot.providers import litellm_provider
 from nanobot.providers.litellm_provider import LiteLLMProvider
 from nanobot.providers.openai_codex_provider import _strip_model_prefix
 from nanobot.providers.registry import find_by_model
@@ -129,3 +131,41 @@ def test_litellm_provider_canonicalizes_github_copilot_hyphen_prefix():
 def test_openai_codex_strip_prefix_supports_hyphen_and_underscore():
     assert _strip_model_prefix("openai-codex/gpt-5.1-codex") == "gpt-5.1-codex"
     assert _strip_model_prefix("openai_codex/gpt-5.1-codex") == "gpt-5.1-codex"
+
+
+QUOTA_ERROR = (
+    'litellm.RateLimitError: geminiException - {"error":{"code":429, '
+    '"message":"quota exceeded. Please retry in 25.801352821s."}}'
+)
+
+
+@pytest.mark.asyncio
+async def test_litellm_retries_gemini_quota_error(monkeypatch):
+    calls = 0
+    delays = []
+
+    async def fake_acompletion(**_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise Exception(QUOTA_ERROR)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(
+                message=SimpleNamespace(content="ok", tool_calls=None), finish_reason="stop"
+            )],
+            usage=None,
+        )
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+
+    monkeypatch.setattr(litellm_provider, "acompletion", fake_acompletion)
+    monkeypatch.setattr(litellm_provider.asyncio, "sleep", fake_sleep)
+
+    result = await LiteLLMProvider(default_model="gemini/gemini-3.5-flash-lite").chat(
+        [{"role": "user", "content": "hi"}]
+    )
+
+    assert result.content == "ok"
+    assert calls == 2
+    assert delays == [pytest.approx(25.801352821)]

@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import re
 from typing import Any
 
 import json_repair
@@ -23,9 +24,16 @@ GEMINI_RETRY_ATTEMPTS = 3
 GEMINI_RETRY_DELAY_S = 60.0
 
 
-def _is_gemini_overload(exc: Exception, model: str) -> bool:
+def _gemini_retry_delay(exc: Exception, model: str) -> float | None:
     text = str(exc).lower()
-    return "gemini" in model.lower() and "503" in text and "high demand" in text
+    if "gemini" not in model.lower():
+        return None
+    if "503" in text and "high demand" in text:
+        return GEMINI_RETRY_DELAY_S
+    if "429" not in text or "quota exceeded" not in text:
+        return None
+    match = re.search(r"retry in ([0-9.]+)s", text)
+    return float(match.group(1)) if match else None
 
 
 class LiteLLMProvider(LLMProvider):
@@ -320,18 +328,19 @@ class LiteLLMProvider(LLMProvider):
                 response = await acompletion(**kwargs)
                 return self._parse_response(response)
             except Exception as e:
-                if not _is_gemini_overload(e, original_model) or attempt >= GEMINI_RETRY_ATTEMPTS:
+                retry_delay = _gemini_retry_delay(e, original_model)
+                if retry_delay is None or attempt >= GEMINI_RETRY_ATTEMPTS:
                     return LLMResponse(
                         content=f"Error calling LLM: {str(e)}",
                         finish_reason="error",
                     )
                 logger.warning(
                     "Gemini unavailable, retrying in {}s (attempt {}/{})",
-                    GEMINI_RETRY_DELAY_S,
+                    retry_delay,
                     attempt + 1,
                     GEMINI_RETRY_ATTEMPTS,
                 )
-                await asyncio.sleep(GEMINI_RETRY_DELAY_S)
+                await asyncio.sleep(retry_delay)
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse LiteLLM response into our standard format."""
